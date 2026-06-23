@@ -2,7 +2,7 @@
 
 Fast, deduplicating photo importer for a Capture One library.
 
-Imports media into a `YYYY/MM` tree named `YYYY-MM-DD--HH-MM-SS-<original>`, skipping files whose contents already exist anywhere in the library.
+Imports media into a `YYYY/MM` tree named `YYYY-MM-DD--HH-MM-SS-<original>`, skipping files whose contents are already in the index.
 Duplicate detection is a BLAKE3 content-hash lookup against a SQLite index, so it stays fast across a terabyte-scale library where Capture One's own import scan is slow.
 
 ## Install
