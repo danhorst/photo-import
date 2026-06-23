@@ -39,6 +39,7 @@ Files without a readable capture date go to `Unsorted/`.
 - `photo-import <source>` — import from a directory. Flags: `--dry-run`, `--debug`.
 - `photo-import index` — build or refresh the content-hash index.
 - `photo-import stats` — show index location and size.
+- `photo-import config <cmd>` — read/write the config file (see below).
 - `photo-import version` — print the version.
 
 ## Configuration
@@ -52,6 +53,17 @@ database = "/Volumes/Photos/.photo-index.db"
 
 Both default as shown; the database defaults to a dotfile inside the library so it travels with the drive.
 Override per run with `--library`/`-L` and `--db`.
+
+Manage the file from the CLI instead of editing by hand:
+
+```
+photo-import config init                       # write a default config file
+photo-import config set library /Volumes/Archive
+photo-import config show                        # print the effective values
+photo-import config path                        # print the file location
+```
+
+`database` derives from `library` unless set explicitly, so changing the library moves the index with it.
 
 ## Organization
 

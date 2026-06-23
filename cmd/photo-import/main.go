@@ -32,7 +32,16 @@ Usage:
   photo-import <source> [flags]   Import media from a card or queue directory
   photo-import index [flags]      Build/refresh the content-hash index
   photo-import stats [flags]      Show index location and size
+  photo-import config <cmd>       Read/write the config file (see below)
   photo-import version            Print the version
+
+Config commands:
+  config path                     Print the config file location
+  config show                     Print the effective library and database
+  config init                     Write a default config file
+  config get <library|database>   Print one effective value
+  config set <library|database> <value>
+                                  Set a value, creating the file if needed
 
 Flags:
   -L, --library DIR   Photo library root (overrides config and default)
@@ -55,6 +64,8 @@ func main() {
 		err = cmdIndex(args[1:])
 	case "stats":
 		err = cmdStats(args[1:])
+	case "config":
+		err = cmdConfig(args[1:])
 	case "version", "--version", "-v":
 		fmt.Println(version)
 	case "help", "--help", "-h":
@@ -372,6 +383,72 @@ func cmdStats(args []string) error {
 	} else {
 		fmt.Printf("Last run: %s\n", last.Format(time.RFC3339))
 	}
+	return nil
+}
+
+func cmdConfig(args []string) error {
+	if len(args) == 0 {
+		return configShow()
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "path":
+		fmt.Println(config.Path())
+		return nil
+	case "show":
+		return configShow()
+	case "init":
+		p := config.Path()
+		if _, err := os.Stat(p); err == nil {
+			return fmt.Errorf("config already exists at %s (use 'config set' to change values)", p)
+		}
+		if err := config.WriteDefault(); err != nil {
+			return err
+		}
+		fmt.Printf("wrote default config to %s\n", p)
+		return nil
+	case "get":
+		if len(rest) != 1 {
+			return fmt.Errorf("usage: photo-import config get <library|database>")
+		}
+		cfg, err := config.Load("", "")
+		if err != nil {
+			return err
+		}
+		v, err := cfg.Get(rest[0])
+		if err != nil {
+			return err
+		}
+		fmt.Println(v)
+		return nil
+	case "set":
+		if len(rest) != 2 {
+			return fmt.Errorf("usage: photo-import config set <library|database> <value>")
+		}
+		cfg, err := config.LoadFile()
+		if err != nil {
+			return err
+		}
+		if err := cfg.Set(rest[0], rest[1]); err != nil {
+			return err
+		}
+		if err := config.Save(cfg); err != nil {
+			return err
+		}
+		fmt.Printf("set %s = %s in %s\n", rest[0], rest[1], config.Path())
+		return nil
+	default:
+		return fmt.Errorf("unknown config command %q (want path, show, init, get, set)", sub)
+	}
+}
+
+func configShow() error {
+	cfg, err := config.Load("", "")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("library  = %s\n", cfg.Library)
+	fmt.Printf("database = %s\n", cfg.Database)
 	return nil
 }
 
