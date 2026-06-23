@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-22
+
 ### Added
 
 - Initial Go rewrite. `photo-import <source>` organizes media into the
@@ -12,4 +14,4 @@
 - TOML configuration at `~/.config/photo-import/photo-import.toml` with
   `--library`/`-L` and `--db` overrides.
 
-[Unreleased]: https://github.com/danhorst/photo-import/compare/v0.0.0...HEAD
+[Unreleased]: https://github.com/danhorst/photo-import/compare/v0.1.0...HEAD
