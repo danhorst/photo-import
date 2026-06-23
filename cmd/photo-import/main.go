@@ -1,0 +1,432 @@
+// Command photo-import organizes photos into a YYYY/MM library, skipping
+// content duplicates using a BLAKE3 hash index, so Capture One only ever has to
+// synchronize genuinely-new files.
+package main
+
+import (
+	"flag"
+	"fmt"
+	"io/fs"
+	"log"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/dbh/photo-import/internal/config"
+	"github.com/dbh/photo-import/internal/exif"
+	"github.com/dbh/photo-import/internal/hash"
+	"github.com/dbh/photo-import/internal/index"
+	"github.com/dbh/photo-import/internal/media"
+	"github.com/dbh/photo-import/internal/organize"
+)
+
+// version is set at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
+const usage = `photo-import — fast, deduplicating photo importer
+
+Usage:
+  photo-import <source> [flags]   Import media from a card or queue directory
+  photo-import index [flags]      Build/refresh the content-hash index
+  photo-import stats [flags]      Show index location and size
+  photo-import version            Print the version
+
+Flags:
+  -L, --library DIR   Photo library root (overrides config and default)
+      --db FILE       Index database path (overrides config and default)
+      --debug         Print a detailed activity log
+      --dry-run       Import only: report actions without moving files
+`
+
+func main() {
+	log.SetFlags(0)
+	args := os.Args[1:]
+	if len(args) == 0 {
+		fmt.Print(usage)
+		os.Exit(2)
+	}
+
+	var err error
+	switch args[0] {
+	case "index":
+		err = cmdIndex(args[1:])
+	case "stats":
+		err = cmdStats(args[1:])
+	case "version", "--version", "-v":
+		fmt.Println(version)
+	case "help", "--help", "-h":
+		fmt.Print(usage)
+	default:
+		err = cmdImport(args)
+	}
+	if err != nil {
+		log.Fatalf("photo-import: %v", err)
+	}
+}
+
+// commonFlags registers the flags shared by every subcommand.
+func commonFlags(fs *flag.FlagSet) (lib, db *string, debug *bool) {
+	lib = fs.String("library", "", "photo library root")
+	fs.StringVar(lib, "L", "", "photo library root (shorthand)")
+	db = fs.String("db", "", "index database path")
+	debug = fs.Bool("debug", false, "print a detailed activity log")
+	return lib, db, debug
+}
+
+// parseArgs parses flags that may appear before or after positional arguments,
+// which the stdlib flag package does not handle on its own (it stops at the
+// first positional). It returns the collected positionals.
+func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positionals []string
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	for fs.NArg() > 0 {
+		positionals = append(positionals, fs.Arg(0))
+		if err := fs.Parse(fs.Args()[1:]); err != nil {
+			return nil, err
+		}
+	}
+	return positionals, nil
+}
+
+func cmdImport(args []string) error {
+	fs := flag.NewFlagSet("import", flag.ExitOnError)
+	lib, db, debug := commonFlags(fs)
+	dryRun := fs.Bool("dry-run", false, "report actions without moving files")
+	fs.Usage = func() { fmt.Print(usage) }
+	positionals, err := parseArgs(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(positionals) != 1 {
+		fmt.Print(usage)
+		os.Exit(2)
+	}
+	source := positionals[0]
+
+	cfg, err := config.Load(*lib, *db)
+	if err != nil {
+		return err
+	}
+	idx, err := index.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer idx.Close()
+
+	logf := debugLogger(*debug)
+
+	paths, err := collectMedia(source)
+	if err != nil {
+		return err
+	}
+	logf("found %d media file(s) under %s", len(paths), source)
+
+	dates, err := exif.Dates(paths)
+	if err != nil {
+		return fmt.Errorf("reading dates: %w", err)
+	}
+
+	var imported, dups, unsorted int
+	touched := map[string]bool{}
+
+	for _, src := range paths {
+		fi, err := os.Stat(src)
+		if err != nil {
+			logf("skip %s: %v", src, err)
+			continue
+		}
+		h, err := hash.File(src)
+		if err != nil {
+			logf("skip %s: %v", src, err)
+			continue
+		}
+
+		if existing, found, err := idx.Lookup(h); err != nil {
+			return err
+		} else if found {
+			dups++
+			logf("dup  %s == %s", src, existing)
+			continue
+		}
+
+		t, dated := dates[src]
+		if !dated {
+			t = fi.ModTime()
+		}
+
+		var dst string
+		if dated {
+			dst = organize.Dest(cfg.Library, t, filepath.Base(src))
+		} else {
+			// No reliable capture date: file under Unsorted for manual review.
+			dst = filepath.Join(cfg.Library, "Unsorted", filepath.Base(src))
+		}
+
+		dst, isDup, err := resolveCollision(dst, h)
+		if err != nil {
+			return err
+		}
+		if isDup {
+			dups++
+			logf("dup  %s already in library as %s", src, dst)
+			if err := idx.Put(dst, fi.Size(), fi.ModTime().Unix(), h); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if *dryRun {
+			logf("would import %s -> %s", src, dst)
+		} else {
+			moved, err := organize.Place(src, dst)
+			if err != nil {
+				return fmt.Errorf("placing %s: %w", src, err)
+			}
+			if err := idx.Put(dst, fi.Size(), fi.ModTime().Unix(), h); err != nil {
+				return err
+			}
+			verb := "copied"
+			if moved {
+				verb = "moved"
+			}
+			logf("%s %s -> %s", verb, src, dst)
+		}
+
+		if !dated {
+			unsorted++
+		}
+		imported++
+		touched[filepath.Dir(dst)] = true
+	}
+
+	printSummary(cfg.Library, imported, dups, unsorted, touched, *dryRun)
+	return nil
+}
+
+// resolveCollision finds an available destination path. If a file already exists
+// at dst with identical content, it returns isDup=true. If the bytes differ, it
+// appends a numeric suffix until a free path is found.
+func resolveCollision(dst, srcHash string) (path string, isDup bool, err error) {
+	ext := filepath.Ext(dst)
+	stem := dst[:len(dst)-len(ext)]
+	for n := 0; ; n++ {
+		candidate := dst
+		if n > 0 {
+			candidate = fmt.Sprintf("%s-%02d%s", stem, n, ext)
+		}
+		if _, statErr := os.Stat(candidate); os.IsNotExist(statErr) {
+			return candidate, false, nil
+		} else if statErr != nil {
+			return "", false, statErr
+		}
+		existing, hErr := hash.File(candidate)
+		if hErr != nil {
+			return "", false, hErr
+		}
+		if existing == srcHash {
+			return candidate, true, nil
+		}
+	}
+}
+
+func cmdIndex(args []string) error {
+	fs := flag.NewFlagSet("index", flag.ExitOnError)
+	lib, db, debug := commonFlags(fs)
+	if _, err := parseArgs(fs, args); err != nil {
+		return err
+	}
+	cfg, err := config.Load(*lib, *db)
+	if err != nil {
+		return err
+	}
+	idx, err := index.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer idx.Close()
+
+	return buildIndex(cfg, idx, *debug)
+}
+
+type job struct {
+	path  string
+	size  int64
+	mtime int64
+}
+
+func buildIndex(cfg config.Config, idx *index.Index, debug bool) error {
+	logf := debugLogger(debug)
+
+	var jobs []job
+	var cached int
+	walkErr := filepath.WalkDir(cfg.Library, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			logf("walk %s: %v", p, err)
+			return nil
+		}
+		if d.IsDir() {
+			if media.IsExcludedDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if p == cfg.Database || !media.IsMedia(d.Name()) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		size, mtime := info.Size(), info.ModTime().Unix()
+		if _, ok := idx.Cached(p, size, mtime); ok {
+			cached++
+			return nil
+		}
+		jobs = append(jobs, job{p, size, mtime})
+		return nil
+	})
+	if walkErr != nil {
+		return walkErr
+	}
+
+	type result struct {
+		job  job
+		hash string
+		err  error
+	}
+	jobCh := make(chan job)
+	resCh := make(chan result)
+	var wg sync.WaitGroup
+	for i := 0; i < runtime.NumCPU(); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobCh {
+				h, err := hash.File(j.path)
+				resCh <- result{j, h, err}
+			}
+		}()
+	}
+	go func() {
+		for _, j := range jobs {
+			jobCh <- j
+		}
+		close(jobCh)
+		wg.Wait()
+		close(resCh)
+	}()
+
+	var hashed, failed int
+	for r := range resCh {
+		if r.err != nil {
+			failed++
+			logf("hash %s: %v", r.job.path, r.err)
+			continue
+		}
+		if err := idx.Put(r.job.path, r.job.size, r.job.mtime, r.hash); err != nil {
+			return err
+		}
+		hashed++
+		logf("indexed %s", r.job.path)
+	}
+
+	total, _, err := idx.Stats()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Indexed %d new/changed file(s); %d unchanged; %d error(s); %d total in index\n",
+		hashed, cached, failed, total)
+	return nil
+}
+
+func cmdStats(args []string) error {
+	fs := flag.NewFlagSet("stats", flag.ExitOnError)
+	lib, db, _ := commonFlags(fs)
+	if _, err := parseArgs(fs, args); err != nil {
+		return err
+	}
+	cfg, err := config.Load(*lib, *db)
+	if err != nil {
+		return err
+	}
+	idx, err := index.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer idx.Close()
+
+	count, last, err := idx.Stats()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Library:  %s\n", cfg.Library)
+	fmt.Printf("Database: %s\n", cfg.Database)
+	fmt.Printf("Indexed:  %d file(s)\n", count)
+	if last.IsZero() {
+		fmt.Println("Last run: never")
+	} else {
+		fmt.Printf("Last run: %s\n", last.Format(time.RFC3339))
+	}
+	return nil
+}
+
+// collectMedia returns the managed media files under root, recursively.
+func collectMedia(root string) ([]string, error) {
+	var paths []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if media.IsExcludedDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if media.IsMedia(d.Name()) {
+			paths = append(paths, p)
+		}
+		return nil
+	})
+	return paths, err
+}
+
+func printSummary(library string, imported, dups, unsorted int, touched map[string]bool, dryRun bool) {
+	verb := "Imported"
+	if dryRun {
+		verb = "Would import"
+	}
+	fmt.Printf("\n%s %d file(s); skipped %d duplicate(s)", verb, imported, dups)
+	if unsorted > 0 {
+		fmt.Printf("; %d undated file(s) went to Unsorted/", unsorted)
+	}
+	fmt.Println(".")
+
+	if len(touched) == 0 {
+		return
+	}
+	dirs := make([]string, 0, len(touched))
+	for d := range touched {
+		if rel, err := filepath.Rel(library, d); err == nil {
+			d = rel
+		}
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	fmt.Println("\nSynchronize these folders in Capture One:")
+	for _, d := range dirs {
+		fmt.Printf("  %s\n", d)
+	}
+}
+
+func debugLogger(debug bool) func(string, ...any) {
+	if !debug {
+		return func(string, ...any) {}
+	}
+	return func(format string, a ...any) { log.Printf(format, a...) }
+}
