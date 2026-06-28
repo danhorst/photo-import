@@ -4,6 +4,7 @@
 .claude/*
 !.claude/commands/
 !.claude/skills/
+# CLAUDE.md is the tracked symlink to AGENTS.md; this ignores any other local CLAUDE.md
 CLAUDE.md
 
 # Go build artifacts
