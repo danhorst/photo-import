@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-27
+
 ### Added
 
 - `media list` prints every cached volume (name, id, file count, last seen), including caches created before this change.
@@ -57,7 +59,8 @@
 - TOML configuration at `~/.config/photo-import/photo-import.toml` with
   `--library`/`-L` and `--db` overrides.
 
-[Unreleased]: https://github.com/danhorst/photo-import/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/danhorst/photo-import/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/danhorst/photo-import/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/danhorst/photo-import/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/danhorst/photo-import/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/danhorst/photo-import/compare/v0.1.0...v0.2.0
