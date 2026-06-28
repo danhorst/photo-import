@@ -3,6 +3,7 @@
 *.swp
 .claude/*
 !.claude/commands/
+!.claude/skills/
 CLAUDE.md
 
 # Go build artifacts
