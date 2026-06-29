@@ -14,10 +14,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"text/tabwriter"
 	"time"
 
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/dbh/photo-import/internal/config"
 	"github.com/dbh/photo-import/internal/exif"
 	"github.com/dbh/photo-import/internal/hash"
@@ -666,16 +667,24 @@ func cmdMediaList(args []string) error {
 		fmt.Println("no cached volumes")
 		return nil
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tID\tFILES\tLAST SEEN")
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		Headers("NAME", "ID", "FILES", "LAST SEEN").
+		StyleFunc(func(row, _ int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return lipgloss.NewStyle().Bold(true).Padding(0, 1)
+			}
+			return lipgloss.NewStyle().Padding(0, 1)
+		})
 	for _, v := range vols {
 		lastSeen := "—"
 		if !v.LastSeen.IsZero() {
 			lastSeen = v.LastSeen.Format("2006-01-02")
 		}
-		fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", displayName(v), v.VolumeID, v.FileCount, lastSeen)
+		t.Row(displayName(v), v.VolumeID, fmt.Sprintf("%d", v.FileCount), lastSeen)
 	}
-	return w.Flush()
+	fmt.Println(t)
+	return nil
 }
 
 func cmdMediaClear(args []string) error {
