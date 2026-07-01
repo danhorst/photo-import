@@ -64,7 +64,7 @@ Export is incremental: a source whose hash is already recorded in the `derivativ
 ### Publish
 
 `pm publish` imports the `Export/` HEICs that `export` recorded but has not yet pushed into Apple Photos, as a flat import with no album creation.
-It requires [`osxphotos`](https://github.com/RhetTbull/osxphotos).
+It requires [`osxphotos`](https://github.com/RhetTbull/osxphotos), installed with `pipx install osxphotos` — it isn't packaged for Homebrew, so the `pm` formula can't depend on it directly.
 
 Two independent layers keep it from duplicating:
 
