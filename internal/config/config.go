@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -18,13 +20,16 @@ const (
 )
 
 // Keys lists the settable configuration keys.
-var Keys = []string{"library", "database"}
+var Keys = []string{"library", "database", "export_long_edge", "export_quality"}
 
-// Config holds the library root and index database path. Empty fields are
-// omitted when written so the file only records what the user set.
+// Config holds the library root, index database path, and export tuning.
+// Empty fields are omitted when written so the file only records what the
+// user set.
 type Config struct {
-	Library  string `toml:"library,omitempty"`
-	Database string `toml:"database,omitempty"`
+	Library        string `toml:"library,omitempty"`
+	Database       string `toml:"database,omitempty"`
+	ExportLongEdge int    `toml:"export_long_edge,omitempty"`
+	ExportQuality  int    `toml:"export_quality,omitempty"`
 }
 
 // Path returns the config file location, honoring XDG_CONFIG_HOME and falling
@@ -122,6 +127,12 @@ library = "%s"
 # database: content-hash index path
 # Defaults to <library>/.photo-index.db. Uncomment to override.
 # database = "%s"
+
+# export_long_edge: derivative long-edge pixels. Uncomment to override.
+# export_long_edge = 4096
+
+# export_quality: derivative HEIC encode quality. Uncomment to override.
+# export_quality = 70
 `
 
 // WriteDefault writes a commented config file populated with the default values.
@@ -141,8 +152,12 @@ func (c Config) Get(key string) (string, error) {
 		return c.Library, nil
 	case "database":
 		return c.Database, nil
+	case "export_long_edge":
+		return strconv.Itoa(c.ExportLongEdge), nil
+	case "export_quality":
+		return strconv.Itoa(c.ExportQuality), nil
 	default:
-		return "", fmt.Errorf("unknown key %q (want library or database)", key)
+		return "", fmt.Errorf("unknown key %q (want one of %s)", key, strings.Join(Keys, ", "))
 	}
 }
 
@@ -153,8 +168,18 @@ func (c *Config) Set(key, value string) error {
 		c.Library = value
 	case "database":
 		c.Database = value
+	case "export_long_edge", "export_quality":
+		n, err := strconv.Atoi(value)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("%s must be a positive integer, got %q", key, value)
+		}
+		if key == "export_long_edge" {
+			c.ExportLongEdge = n
+		} else {
+			c.ExportQuality = n
+		}
 	default:
-		return fmt.Errorf("unknown key %q (want library or database)", key)
+		return fmt.Errorf("unknown key %q (want one of %s)", key, strings.Join(Keys, ", "))
 	}
 	return nil
 }

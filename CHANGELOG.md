@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- `pm export` generates presentation HEIC derivatives from archive frames into
+  `Export/YYYY/MM`: one base per frame (camera JPEG, or the RAF's embedded
+  `JpgFromRaw` when RAW-only) plus one per baked edit, resized to a configurable
+  long edge (default 4096 px, quality 70) with `DateTimeOriginal`/GPS/orientation
+  carried over and `catalogKey`/`catalogStem` stamped in XMP. Runs are
+  incremental via a new `derivative` index table; `--since` scopes, `--dry-run`
+  previews.
+
 ### Changed
 
 - Renamed the tool from `photo-import` to `photo-management`; the binary is now

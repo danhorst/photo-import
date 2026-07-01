@@ -37,6 +37,7 @@ const usage = `pm — fast, deduplicating photo importer
 
 Usage:
   pm <source> [flags]   Import media from a card or queue directory
+  pm export [flags]     Generate presentation HEICs into Export/
   pm index [flags]      Build/refresh the content-hash index
   pm stats [flags]      Show index location and size
   pm config <cmd>       Read/write the config file (see below)
@@ -60,7 +61,8 @@ Flags:
   -L, --library DIR   Photo library root (overrides config and default)
       --db FILE       Index database path (overrides config and default)
       --debug         Print a detailed activity log
-      --dry-run       Import only: report actions without moving files
+      --dry-run       Import/export: report actions without writing anything
+      --since DATE    Export only: limit to frames captured on/after YYYY-MM-DD
 `
 
 func main() {
@@ -73,6 +75,8 @@ func main() {
 
 	var err error
 	switch args[0] {
+	case "export":
+		err = cmdExport(args[1:])
 	case "index":
 		err = cmdIndex(args[1:])
 	case "stats":

@@ -39,12 +39,25 @@ Re-importing a card that still holds already-imported files is near-instant: eac
 ## Commands
 
 - `pm <source>` — import from a directory. Flags: `--dry-run`, `--debug`.
+- `pm export` — generate presentation HEICs into `Export/` (see below). Flags: `--since YYYY-MM-DD`, `--dry-run`, `--debug`.
 - `pm index` — build or refresh the content-hash index.
 - `pm stats` — show index location and size.
 - `pm config <cmd>` — read/write the config file (see below).
 - `pm media list` — list every cached volume: name, id, file count, and last-seen date.
 - `pm media clear [<id>…]` — remove a volume's skip-cache entries by id or unambiguous id prefix; with no arguments on a terminal, opens an interactive multiselect.
 - `pm version` — print the version.
+
+### Export
+
+`pm export` turns archive frames into downsized HEIC derivatives under `Export/YYYY/MM` inside the library.
+Each frame yields one base derivative — from the sibling camera JPEG, or the RAF's embedded `JpgFromRaw` when RAW-only — named `<stem>.heic`, plus one `<stem>-<suffix>.heic` per baked Capture One edit.
+iPhone-origin frames (a `.HEIC` with no camera JPEG) are left alone.
+
+Derivatives are resized to a 4096 px long edge at quality 70 (configurable via `export_long_edge` / `export_quality`), carry `DateTimeOriginal`/GPS/orientation, and are stamped with `catalogKey` (BLAKE3 of the source file) and `catalogStem` (the frame stem) in XMP.
+Export is incremental: a source whose hash is already recorded in the `derivative` table is skipped, so re-runs only generate what's new.
+`--since YYYY-MM-DD` scopes a run; `--dry-run` reports without writing.
+
+`Export/` is a regenerable presentation mirror — exclude it from backup; only the master tier is backed up.
 
 ### Media cache and reformatted cards
 

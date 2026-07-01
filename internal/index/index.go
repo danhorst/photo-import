@@ -32,6 +32,16 @@ CREATE TABLE IF NOT EXISTS volumes (
 	label     TEXT NOT NULL DEFAULT '',
 	last_seen INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS derivative (
+	source_hash  TEXT PRIMARY KEY,
+	stem         TEXT NOT NULL,
+	source_kind  TEXT NOT NULL,
+	heic_path    TEXT NOT NULL,
+	generated_at INTEGER NOT NULL,
+	photos_uuid  TEXT,
+	published_at INTEGER
+);
 `
 
 const insertSQL = `INSERT INTO files(path, size, mtime, blake3, hashed_at) VALUES(?, ?, ?, ?, ?)
@@ -210,6 +220,72 @@ func (i *Index) ClearVolume(volumeID string) (int64, error) {
 		return 0, err
 	}
 	return n, tx.Commit()
+}
+
+// Derivative is one generated presentation HEIC, keyed by the BLAKE3 hash of
+// the source file that produced it (the version id). photos_uuid/published_at
+// stay null until publish pushes it to Apple Photos.
+type Derivative struct {
+	SourceHash  string
+	Stem        string
+	SourceKind  string
+	HeicPath    string
+	GeneratedAt time.Time
+	PhotosUUID  string
+	PublishedAt time.Time
+}
+
+const putDerivativeSQL = `INSERT INTO derivative(source_hash, stem, source_kind, heic_path, generated_at)
+	VALUES(?, ?, ?, ?, ?)
+	ON CONFLICT(source_hash) DO UPDATE SET
+	  stem=excluded.stem, source_kind=excluded.source_kind,
+	  heic_path=excluded.heic_path, generated_at=excluded.generated_at`
+
+// PutDerivative upserts the derivative row for sourceHash, setting generated_at
+// to now. A repeat source_hash updates in place rather than duplicating.
+func (i *Index) PutDerivative(sourceHash, stem, sourceKind, heicPath string) error {
+	_, err := i.db.Exec(putDerivativeSQL, sourceHash, stem, sourceKind, heicPath, time.Now().Unix())
+	return err
+}
+
+// HasDerivative reports whether a derivative was already generated from the
+// source with the given content hash.
+func (i *Index) HasDerivative(sourceHash string) (bool, error) {
+	var one int
+	err := i.db.QueryRow(`SELECT 1 FROM derivative WHERE source_hash = ?`, sourceHash).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// Derivatives returns every derivative row, ordered by stem then path.
+func (i *Index) Derivatives() ([]Derivative, error) {
+	rows, err := i.db.Query(`
+		SELECT source_hash, stem, source_kind, heic_path, generated_at,
+		       COALESCE(photos_uuid, ''), COALESCE(published_at, 0)
+		FROM derivative ORDER BY stem, heic_path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Derivative
+	for rows.Next() {
+		var d Derivative
+		var gen, pub int64
+		if err := rows.Scan(&d.SourceHash, &d.Stem, &d.SourceKind, &d.HeicPath, &gen, &d.PhotosUUID, &pub); err != nil {
+			return nil, err
+		}
+		d.GeneratedAt = time.Unix(gen, 0)
+		if pub != 0 {
+			d.PublishedAt = time.Unix(pub, 0)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 // Stats returns the number of indexed files and the most recent hash time.

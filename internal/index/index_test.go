@@ -217,3 +217,66 @@ func TestVolumesUnnamedStillAppear(t *testing.T) {
 		t.Errorf("FileCount = %d, want 1", vols[0].FileCount)
 	}
 }
+
+func TestDerivativeRoundTrip(t *testing.T) {
+	idx := open(t)
+
+	has, err := idx.HasDerivative("abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Error("HasDerivative should be false before Put")
+	}
+
+	if err := idx.PutDerivative("abc123", "2026-06-01--12-00-00-DSCF1234", "jpeg", "/lib/Export/2026/06/x.heic"); err != nil {
+		t.Fatal(err)
+	}
+	has, err = idx.HasDerivative("abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Error("HasDerivative should be true after Put")
+	}
+
+	ds, err := idx.Derivatives()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ds) != 1 {
+		t.Fatalf("got %d derivatives, want 1", len(ds))
+	}
+	d := ds[0]
+	if d.SourceHash != "abc123" || d.Stem != "2026-06-01--12-00-00-DSCF1234" ||
+		d.SourceKind != "jpeg" || d.HeicPath != "/lib/Export/2026/06/x.heic" {
+		t.Errorf("round-trip mismatch: %+v", d)
+	}
+	if d.GeneratedAt.IsZero() {
+		t.Error("generated_at should be set")
+	}
+	if d.PhotosUUID != "" || !d.PublishedAt.IsZero() {
+		t.Error("publish columns should start null")
+	}
+}
+
+func TestDerivativeRepeatHashUpserts(t *testing.T) {
+	idx := open(t)
+
+	if err := idx.PutDerivative("abc123", "stem", "jpeg", "/a.heic"); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.PutDerivative("abc123", "stem", "jpeg", "/b.heic"); err != nil {
+		t.Fatal(err)
+	}
+	ds, err := idx.Derivatives()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ds) != 1 {
+		t.Fatalf("repeat source_hash duplicated: %d rows", len(ds))
+	}
+	if ds[0].HeicPath != "/b.heic" {
+		t.Errorf("upsert should take the latest path, got %s", ds[0].HeicPath)
+	}
+}
