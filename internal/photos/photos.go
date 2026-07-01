@@ -20,6 +20,15 @@ type Asset struct {
 	OriginalFilename string
 	CaptureTime      time.Time
 	CatalogKey       string
+	CameraMake       string
+	CameraModel      string
+	IsMovie          bool
+}
+
+// Device returns the asset's capture device as "<make> <model>", the form the
+// pull allowlist uses (e.g. "Apple iPhone 13 mini").
+func (a Asset) Device() string {
+	return strings.TrimSpace(a.CameraMake + " " + a.CameraModel)
 }
 
 // Library abstracts the osxphotos shell-outs so publish logic is testable.
@@ -82,6 +91,11 @@ type manifestEntry struct {
 	UUID             string `json:"uuid"`
 	OriginalFilename string `json:"original_filename"`
 	Date             string `json:"date"`
+	IsMovie          bool   `json:"ismovie"`
+	ExifInfo         *struct {
+		CameraMake  string `json:"camera_make"`
+		CameraModel string `json:"camera_model"`
+	} `json:"exif_info"`
 }
 
 // Manifest queries every asset in the Photos library.
@@ -96,9 +110,12 @@ func (OSXPhotos) Manifest() ([]Asset, error) {
 	}
 	assets := make([]Asset, 0, len(entries))
 	for _, e := range entries {
-		a := Asset{UUID: e.UUID, OriginalFilename: e.OriginalFilename}
+		a := Asset{UUID: e.UUID, OriginalFilename: e.OriginalFilename, IsMovie: e.IsMovie}
 		if t, err := time.Parse(time.RFC3339Nano, e.Date); err == nil {
 			a.CaptureTime = t
+		}
+		if e.ExifInfo != nil {
+			a.CameraMake, a.CameraModel = e.ExifInfo.CameraMake, e.ExifInfo.CameraModel
 		}
 		assets = append(assets, a)
 	}

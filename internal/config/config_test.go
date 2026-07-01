@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -116,7 +117,7 @@ func TestLoadFileMissingIsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing file should not error: %v", err)
 	}
-	if got != (Config{}) {
+	if !reflect.DeepEqual(got, Config{}) {
 		t.Errorf("missing file should yield zero Config, got %+v", got)
 	}
 }

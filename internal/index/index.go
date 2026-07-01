@@ -321,6 +321,26 @@ func (i *Index) UnpublishedDerivatives() ([]Derivative, error) {
 	return out, rows.Err()
 }
 
+// PublishedUUIDs returns the set of Apple Photos asset uuids recorded on
+// derivative rows — the assets this tool pushed (and stamped with a
+// catalogKey).
+func (i *Index) PublishedUUIDs() (map[string]bool, error) {
+	rows, err := i.db.Query(`SELECT photos_uuid FROM derivative WHERE photos_uuid IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		out[u] = true
+	}
+	return out, rows.Err()
+}
+
 // MarkPublished sets the Photos asset uuid and published_at on the derivative
 // row for sourceHash.
 func (i *Index) MarkPublished(sourceHash, photosUUID string) error {

@@ -41,6 +41,7 @@ Re-importing a card that still holds already-imported files is near-instant: eac
 - `pm <source>` — import from a directory. Flags: `--dry-run`, `--debug`.
 - `pm export` — generate presentation HEICs into `Export/` (see below). Flags: `--since YYYY-MM-DD`, `--dry-run`, `--debug`.
 - `pm publish` — import exported HEICs into Apple Photos (see below). Flags: `--dry-run`, `--debug`.
+- `pm pull` — pull iPhone photos from Apple Photos into the archive (see below). Flags: `--since YYYY-MM-DD`, `--dry-run`, `--debug`.
 - `pm index` — build or refresh the content-hash index.
 - `pm stats` — show index location and size.
 - `pm config <cmd>` — read/write the config file (see below).
@@ -72,6 +73,14 @@ Two independent layers keep it from duplicating:
 
 Nothing is ever deleted or replaced: an edit imports as a new asset alongside existing renders of the frame.
 Apple Photos has no unattended programmatic delete by design — `osxphotos` cannot delete, and PhotoKit forces a confirmation prompt — so publish never supersedes.
+
+### Pull
+
+`pm pull` makes the archive canonical for iPhone photos: it exports phone-origin assets from Apple Photos into a queue directory via `osxphotos`, then runs the existing import pipeline over the queue, so BLAKE3 dedup and `YYYY/MM` organizing apply unchanged.
+
+Assets are scoped by a device model allowlist — `pull_devices` in the config, defaulting to `Apple iPhone 13 mini` — and any asset this tool published is excluded so a derivative is never re-ingested.
+Two independent layers keep repeat pulls cheap: `osxphotos --update` skips re-exporting to the queue, and the content-hash index skips re-importing.
+Live Photos import the still only; the motion component is left behind.
 
 ### Media cache and reformatted cards
 

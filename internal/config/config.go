@@ -20,16 +20,21 @@ const (
 )
 
 // Keys lists the settable configuration keys.
-var Keys = []string{"library", "database", "export_long_edge", "export_quality"}
+var Keys = []string{"library", "database", "export_long_edge", "export_quality", "pull_devices"}
 
-// Config holds the library root, index database path, and export tuning.
-// Empty fields are omitted when written so the file only records what the
-// user set.
+// DefaultPullDevices is the reverse-syndication device allowlist used when the
+// config does not set one.
+var DefaultPullDevices = []string{"Apple iPhone 13 mini"}
+
+// Config holds the library root, index database path, export tuning, and the
+// pull device allowlist. Empty fields are omitted when written so the file
+// only records what the user set.
 type Config struct {
-	Library        string `toml:"library,omitempty"`
-	Database       string `toml:"database,omitempty"`
-	ExportLongEdge int    `toml:"export_long_edge,omitempty"`
-	ExportQuality  int    `toml:"export_quality,omitempty"`
+	Library        string   `toml:"library,omitempty"`
+	Database       string   `toml:"database,omitempty"`
+	ExportLongEdge int      `toml:"export_long_edge,omitempty"`
+	ExportQuality  int      `toml:"export_quality,omitempty"`
+	PullDevices    []string `toml:"pull_devices,omitempty"`
 }
 
 // Path returns the config file location, honoring XDG_CONFIG_HOME and falling
@@ -133,6 +138,9 @@ library = "%s"
 
 # export_quality: derivative HEIC encode quality. Uncomment to override.
 # export_quality = 70
+
+# pull_devices: device model allowlist for pull. Uncomment to override.
+# pull_devices = ["Apple iPhone 13 mini"]
 `
 
 // WriteDefault writes a commented config file populated with the default values.
@@ -156,6 +164,8 @@ func (c Config) Get(key string) (string, error) {
 		return strconv.Itoa(c.ExportLongEdge), nil
 	case "export_quality":
 		return strconv.Itoa(c.ExportQuality), nil
+	case "pull_devices":
+		return strings.Join(c.PullDevices, ", "), nil
 	default:
 		return "", fmt.Errorf("unknown key %q (want one of %s)", key, strings.Join(Keys, ", "))
 	}
@@ -177,6 +187,13 @@ func (c *Config) Set(key, value string) error {
 			c.ExportLongEdge = n
 		} else {
 			c.ExportQuality = n
+		}
+	case "pull_devices":
+		c.PullDevices = nil
+		for _, d := range strings.Split(value, ",") {
+			if d = strings.TrimSpace(d); d != "" {
+				c.PullDevices = append(c.PullDevices, d)
+			}
 		}
 	default:
 		return fmt.Errorf("unknown key %q (want one of %s)", key, strings.Join(Keys, ", "))

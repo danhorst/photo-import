@@ -17,6 +17,11 @@
   present in Photos are matched on `DateTimeOriginal` + original filename
   against a new `photos_manifest` cache and associated instead of re-imported.
   Nothing is ever deleted or replaced; edits import as new assets.
+- `pm pull` reverse-syndicates iPhone photos: `osxphotos export --update` into a
+  queue directory, scoped by a `pull_devices` model allowlist (default
+  `Apple iPhone 13 mini`) and excluding anything this tool published, then the
+  existing import pipeline over the queue — BLAKE3 dedup and `YYYY/MM`
+  organizing unchanged. Live Photos import the still only.
 
 ### Changed
 

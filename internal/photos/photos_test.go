@@ -69,3 +69,37 @@ func TestMatcherIPhoneOriginAlreadyPresent(t *testing.T) {
 		t.Errorf("Match = %q %v, want the existing iPhone asset", uuid, ok)
 	}
 }
+
+func TestPullable(t *testing.T) {
+	allowed := AllowedDevices([]string{"Apple iPhone 13 mini"})
+	published := map[string]bool{"our-derivative": true}
+	iphone := Asset{UUID: "a1", CameraMake: "Apple", CameraModel: "iPhone 13 mini",
+		CaptureTime: date("2026-06-01T12:00:00-05:00")}
+
+	if !Pullable(iphone, allowed, published, time.Time{}) {
+		t.Error("allowlisted iPhone photo should be pullable")
+	}
+
+	fuji := iphone
+	fuji.CameraMake, fuji.CameraModel = "FUJIFILM", "X-T5"
+	if Pullable(fuji, allowed, published, time.Time{}) {
+		t.Error("non-allowlisted device should not be pullable")
+	}
+
+	movie := iphone
+	movie.IsMovie = true
+	if Pullable(movie, allowed, published, time.Time{}) {
+		t.Error("movies should not be pullable")
+	}
+
+	ours := iphone
+	ours.UUID = "our-derivative"
+	if Pullable(ours, allowed, published, time.Time{}) {
+		t.Error("a published derivative must never be re-ingested")
+	}
+
+	since := date("2026-06-02T00:00:00-05:00")
+	if Pullable(iphone, allowed, published, since) {
+		t.Error("asset before --since should not be pullable")
+	}
+}

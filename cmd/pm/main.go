@@ -39,6 +39,7 @@ Usage:
   pm <source> [flags]   Import media from a card or queue directory
   pm export [flags]     Generate presentation HEICs into Export/
   pm publish [flags]    Import exported HEICs into Apple Photos
+  pm pull [flags]       Pull iPhone photos from Apple Photos into the archive
   pm index [flags]      Build/refresh the content-hash index
   pm stats [flags]      Show index location and size
   pm config <cmd>       Read/write the config file (see below)
@@ -62,8 +63,8 @@ Flags:
   -L, --library DIR   Photo library root (overrides config and default)
       --db FILE       Index database path (overrides config and default)
       --debug         Print a detailed activity log
-      --dry-run       Import/export/publish: report actions without writing anything
-      --since DATE    Export only: limit to frames captured on/after YYYY-MM-DD
+      --dry-run       Import/export/publish/pull: report actions without writing anything
+      --since DATE    Export/pull: limit to frames captured on/after YYYY-MM-DD
 `
 
 func main() {
@@ -80,6 +81,8 @@ func main() {
 		err = cmdExport(args[1:])
 	case "publish":
 		err = cmdPublish(args[1:])
+	case "pull":
+		err = cmdPull(args[1:])
 	case "index":
 		err = cmdIndex(args[1:])
 	case "stats":
@@ -140,7 +143,6 @@ func cmdImport(args []string) error {
 		os.Exit(2)
 	}
 	source := positionals[0]
-	start := time.Now()
 
 	cfg, err := config.Load(*lib, *db)
 	if err != nil {
@@ -152,8 +154,19 @@ func cmdImport(args []string) error {
 	}
 	defer idx.Close()
 
-	logf := debugLogger(*debug)
-	showProgress := !*debug && isatty.IsTerminal(os.Stderr.Fd())
+	return runImport(cfg, idx, source, *dryRun, *debug, true)
+}
+
+// runImport pulls the media under source into the library: BLAKE3 dedup,
+// capture-date organization, move-or-copy. With useVolume the source is
+// treated as a removable card — stamped with a marker and tracked in the
+// per-volume skip cache; without it (a scratch queue directory) only the
+// content-hash dedup applies.
+func runImport(cfg config.Config, idx *index.Index, source string, dryRun, debug, useVolume bool) error {
+	start := time.Now()
+
+	logf := debugLogger(debug)
+	showProgress := !debug && isatty.IsTerminal(os.Stderr.Fd())
 
 	paths, err := collectMedia(source)
 	if err != nil {
@@ -161,27 +174,33 @@ func cmdImport(args []string) error {
 	}
 	logf("found %d media file(s) under %s", len(paths), source)
 
-	root, volID, marker, existed, err := volume.Resolve(source)
-	if err != nil {
-		return fmt.Errorf("identifying volume: %w", err)
-	}
-	if !existed && !*dryRun {
-		if err := volume.Stamp(root, marker); err != nil {
-			return fmt.Errorf("stamping volume: %w", err)
+	var root, volID string
+	seen := map[string]index.MediaRecord{}
+	if useVolume {
+		var marker volume.Marker
+		var existed bool
+		root, volID, marker, existed, err = volume.Resolve(source)
+		if err != nil {
+			return fmt.Errorf("identifying volume: %w", err)
 		}
-	}
-	// Register only when there is media to record, so an empty card cannot leave
-	// a volumes row with no media_files (invisible to media list/clear).
-	if !*dryRun && len(paths) > 0 {
-		if err := idx.PutVolume(volID, filepath.Base(root)); err != nil {
+		if !existed && !dryRun {
+			if err := volume.Stamp(root, marker); err != nil {
+				return fmt.Errorf("stamping volume: %w", err)
+			}
+		}
+		// Register only when there is media to record, so an empty card cannot leave
+		// a volumes row with no media_files (invisible to media list/clear).
+		if !dryRun && len(paths) > 0 {
+			if err := idx.PutVolume(volID, filepath.Base(root)); err != nil {
+				return err
+			}
+		}
+		logf("volume %s at %s", volID, root)
+
+		seen, err = idx.VolumeMedia(volID)
+		if err != nil {
 			return err
 		}
-	}
-	logf("volume %s at %s", volID, root)
-
-	seen, err := idx.VolumeMedia(volID)
-	if err != nil {
-		return err
 	}
 
 	daemon, err := exif.NewDaemon()
@@ -227,7 +246,7 @@ func cmdImport(args []string) error {
 		} else if found {
 			dups++
 			logf("dup  %s == %s", src, existing)
-			if !*dryRun {
+			if useVolume && !dryRun {
 				if err := idx.PutMedia(volID, rel, fi.Size(), fi.ModTime().Unix()); err != nil {
 					return err
 				}
@@ -255,18 +274,20 @@ func cmdImport(args []string) error {
 		if isDup {
 			dups++
 			logf("dup  %s already in library as %s", src, dst)
-			if !*dryRun {
+			if !dryRun {
 				if err := idx.Put(dst, fi.Size(), fi.ModTime().Unix(), h); err != nil {
 					return err
 				}
-				if err := idx.PutMedia(volID, rel, fi.Size(), fi.ModTime().Unix()); err != nil {
-					return err
+				if useVolume {
+					if err := idx.PutMedia(volID, rel, fi.Size(), fi.ModTime().Unix()); err != nil {
+						return err
+					}
 				}
 			}
 			continue
 		}
 
-		if *dryRun {
+		if dryRun {
 			logf("would import %s -> %s", src, dst)
 		} else {
 			moved, err := organize.Place(src, dst)
@@ -276,8 +297,10 @@ func cmdImport(args []string) error {
 			if err := idx.Put(dst, fi.Size(), fi.ModTime().Unix(), h); err != nil {
 				return err
 			}
-			if err := idx.PutMedia(volID, rel, fi.Size(), fi.ModTime().Unix()); err != nil {
-				return err
+			if useVolume {
+				if err := idx.PutMedia(volID, rel, fi.Size(), fi.ModTime().Unix()); err != nil {
+					return err
+				}
 			}
 			verb := "copied"
 			if moved {
@@ -297,7 +320,7 @@ func cmdImport(args []string) error {
 		importBar.Finish()
 		fmt.Fprintln(os.Stderr)
 	}
-	printSummary(cfg.Library, imported, dups, skipped, unsorted, touched, *dryRun, time.Since(start))
+	printSummary(cfg.Library, imported, dups, skipped, unsorted, touched, dryRun, time.Since(start))
 	return nil
 }
 
