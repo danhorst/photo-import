@@ -65,6 +65,9 @@ Flags:
       --debug         Print a detailed activity log
       --dry-run       Import/export/publish/pull: report actions without writing anything
       --since DATE    Export/pull: limit to frames captured on/after YYYY-MM-DD
+      --photos-library PATH
+                      Publish/pull: target this Photos library instead of
+                      whatever's open (see README for the import caveat)
 `
 
 func main() {

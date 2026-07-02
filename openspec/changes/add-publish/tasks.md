@@ -31,4 +31,4 @@
 
 - [x] 5.1 `go test ./...` passes (matcher and index covered; osxphotos calls behind an interface)
 - [x] 5.2 `openspec validate add-publish --strict` passes
-- [ ] 5.3 Manual: against a throwaway `--db`/`-L` sandbox and a test Photos library, publish new derivatives (imported once), re-run (skipped by layer 1), and confirm a frame already in Photos is skipped by layer 2
+- [x] 5.3 Manual: against a throwaway `--db`/`-L` sandbox and a test Photos library, publish new derivatives (imported once), re-run (skipped by layer 1), and confirm a frame already in Photos is skipped by layer 2

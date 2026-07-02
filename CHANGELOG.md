@@ -22,6 +22,14 @@
   `Apple iPhone 13 mini`) and excluding anything this tool published, then the
   existing import pipeline over the queue — BLAKE3 dedup and `YYYY/MM`
   organizing unchanged. Live Photos import the still only.
+- `pm publish`/`pm pull` gained `--photos-library PATH` to target a specific
+  Photos library instead of whatever's open (useful for testing against a
+  throwaway library). `publish` verifies the pinned library matches what
+  Photos.app actually has open before writing and aborts otherwise, since
+  `osxphotos import` itself always writes into whichever library is open
+  regardless of this flag.
+- `osxphotos` errors that carry macOS's Full Disk Access failure signature now
+  get a plain-language hint instead of just the raw Python traceback.
 
 ### Changed
 

@@ -23,6 +23,7 @@ func cmdPull(args []string) error {
 	lib, db, debug := commonFlags(fs)
 	dryRun := fs.Bool("dry-run", false, "report what would be pulled without writing anything")
 	since := fs.String("since", "", "limit to assets captured on/after this date (YYYY-MM-DD)")
+	photosLib := fs.String("photos-library", "", "target this Photos library instead of whatever's open")
 	fs.Usage = func() { fmt.Print(usage) }
 	if _, err := parseArgs(fs, args); err != nil {
 		return err
@@ -47,7 +48,7 @@ func cmdPull(args []string) error {
 	}
 	defer idx.Close()
 
-	return pull(cfg, idx, photos.OSXPhotos{}, debugLogger(*debug), sinceDate, *dryRun, *debug)
+	return pull(cfg, idx, photos.OSXPhotos{PhotosLibrary: *photosLib}, debugLogger(*debug), sinceDate, *dryRun, *debug)
 }
 
 // pull exports allowlisted iPhone-origin assets from Apple Photos into the

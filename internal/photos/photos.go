@@ -6,6 +6,7 @@ package photos
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -84,8 +85,46 @@ func (m Matcher) Match(stem string) (uuid string, ok bool) {
 	return uuid, ok
 }
 
-// OSXPhotos implements Library by shelling out to the osxphotos CLI.
-type OSXPhotos struct{}
+// OSXPhotos implements Library by shelling out to the osxphotos CLI. When
+// PhotosLibrary is set, every query/export call is pinned to that library
+// file directly; import cannot be pinned this way (see Import) so callers
+// that write must ensure Photos.app already has PhotosLibrary open.
+type OSXPhotos struct {
+	PhotosLibrary string
+}
+
+// libraryArgs returns the --library flag pair when PhotosLibrary is set, or
+// nil otherwise.
+func (o OSXPhotos) libraryArgs() []string {
+	if o.PhotosLibrary == "" {
+		return nil
+	}
+	return []string{"--library", o.PhotosLibrary}
+}
+
+// fullDiskAccessHint appends a plain-language hint to osxphotos output that
+// carries macOS's TCC signature for a missing Full Disk Access grant.
+// osxphotos copies the library's sqlite files out of the (often
+// TCC-protected, e.g. ~/Pictures) library path; without Full Disk Access that
+// copy fails and osxphotos surfaces a raw Python traceback instead of a clean
+// error.
+func fullDiskAccessHint(output []byte) string {
+	s := string(output)
+	if strings.Contains(s, "Operation not permitted") || strings.Contains(s, "NSCocoaErrorDomain Code=513") {
+		return "\nhint: this looks like a missing Full Disk Access grant — add your terminal app in System Settings > Privacy & Security > Full Disk Access, then restart it and retry"
+	}
+	return ""
+}
+
+// exitErrOutput returns the captured stderr from err when it is an
+// *exec.ExitError (as populated by Cmd.Output), or nil otherwise.
+func exitErrOutput(err error) []byte {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.Stderr
+	}
+	return nil
+}
 
 type manifestEntry struct {
 	UUID             string `json:"uuid"`
@@ -99,10 +138,11 @@ type manifestEntry struct {
 }
 
 // Manifest queries every asset in the Photos library.
-func (OSXPhotos) Manifest() ([]Asset, error) {
-	out, err := exec.Command("osxphotos", "query", "--json", "--mute").Output()
+func (o OSXPhotos) Manifest() ([]Asset, error) {
+	args := append([]string{"query", "--json", "--mute"}, o.libraryArgs()...)
+	out, err := exec.Command("osxphotos", args...).Output()
 	if err != nil {
-		return nil, fmt.Errorf("osxphotos query: %w", err)
+		return nil, fmt.Errorf("osxphotos query: %w%s", err, fullDiskAccessHint(exitErrOutput(err)))
 	}
 	var entries []manifestEntry
 	if err := json.Unmarshal(out, &entries); err != nil {
@@ -123,8 +163,13 @@ func (OSXPhotos) Manifest() ([]Asset, error) {
 }
 
 // Import pushes one file into Apple Photos as a flat import (no album) and
-// returns the new asset's uuid from the import report.
-func (OSXPhotos) Import(path string) (string, error) {
+// returns the new asset's uuid from the import report. Unlike query/export,
+// osxphotos import does not honor --library as a target selector — it always
+// writes into whichever library Photos.app currently has open; --library is
+// passed here only as the fallback hint osxphotos itself documents, not a
+// safety guarantee. Callers pinning PhotosLibrary must ensure Photos.app is
+// already switched to it before calling Import.
+func (o OSXPhotos) Import(path string) (string, error) {
 	report, err := os.CreateTemp("", "photo-management-import-*.json")
 	if err != nil {
 		return "", err
@@ -132,10 +177,10 @@ func (OSXPhotos) Import(path string) (string, error) {
 	report.Close()
 	defer os.Remove(report.Name())
 
-	out, err := exec.Command("osxphotos", "import", path,
-		"--report", report.Name(), "--no-progress").CombinedOutput()
+	args := append([]string{"import", path, "--report", report.Name(), "--no-progress"}, o.libraryArgs()...)
+	out, err := exec.Command("osxphotos", args...).CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("osxphotos import %s: %v: %s", path, err, out)
+		return "", fmt.Errorf("osxphotos import %s: %v: %s%s", path, err, out, fullDiskAccessHint(out))
 	}
 
 	data, err := os.ReadFile(report.Name())

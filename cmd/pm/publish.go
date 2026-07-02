@@ -14,6 +14,7 @@ func cmdPublish(args []string) error {
 	fs := flag.NewFlagSet("publish", flag.ExitOnError)
 	lib, db, debug := commonFlags(fs)
 	dryRun := fs.Bool("dry-run", false, "report imports and skips without writing anything")
+	photosLib := fs.String("photos-library", "", "target this Photos library instead of whatever's open (see caveat: osxphotos import ignores this — Photos.app must already have it open)")
 	fs.Usage = func() { fmt.Print(usage) }
 	if _, err := parseArgs(fs, args); err != nil {
 		return err
@@ -29,7 +30,44 @@ func cmdPublish(args []string) error {
 	}
 	defer idx.Close()
 
-	return publish(idx, photos.OSXPhotos{}, debugLogger(*debug), *dryRun)
+	if *photosLib != "" {
+		if err := verifyActiveLibrary(*photosLib); err != nil {
+			return err
+		}
+	}
+
+	return publish(idx, photos.OSXPhotos{PhotosLibrary: *photosLib}, debugLogger(*debug), *dryRun)
+}
+
+// verifyActiveLibrary guards the one operation (osxphotos import, via
+// publish's Import calls) that cannot be pinned to a specific library file —
+// it always writes into whichever library Photos.app currently has open. It
+// compares the asset uuids visible when pinned to want against the uuids
+// visible with no --library (the same "currently open" resolution import
+// itself uses); a mismatch means Photos.app isn't on the target library and
+// an import would silently land in the wrong place.
+func verifyActiveLibrary(want string) error {
+	pinned, err := (photos.OSXPhotos{PhotosLibrary: want}).Manifest()
+	if err != nil {
+		return fmt.Errorf("querying --photos-library %s: %w", want, err)
+	}
+	ambient, err := (photos.OSXPhotos{}).Manifest()
+	if err != nil {
+		return fmt.Errorf("querying the currently open Photos library: %w", err)
+	}
+	if len(pinned) != len(ambient) {
+		return fmt.Errorf("--photos-library %s is not the library Photos.app currently has open (pinned query found %d asset(s), the open library has %d) — switch Photos.app to it first", want, len(pinned), len(ambient))
+	}
+	pinnedUUIDs := make(map[string]bool, len(pinned))
+	for _, a := range pinned {
+		pinnedUUIDs[a.UUID] = true
+	}
+	for _, a := range ambient {
+		if !pinnedUUIDs[a.UUID] {
+			return fmt.Errorf("--photos-library %s is not the library Photos.app currently has open — switch Photos.app to it first", want)
+		}
+	}
+	return nil
 }
 
 // publish pushes unpublished derivatives into Apple Photos. Layer 1 skips our

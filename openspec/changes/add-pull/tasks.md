@@ -22,4 +22,4 @@
 
 - [x] 4.1 `go test ./...` passes
 - [x] 4.2 `openspec validate add-pull --strict` passes
-- [ ] 4.3 Manual: against a throwaway `--db`/`-L` sandbox and a test Photos library, pull once (imported), pull again (skipped by BLAKE3), and confirm a `catalogKey`-stamped asset is never re-ingested
+- [x] 4.3 Manual: against a throwaway `--db`/`-L` sandbox and a test Photos library, pull once (imported), pull again (skipped by BLAKE3), and confirm a `catalogKey`-stamped asset is never re-ingested

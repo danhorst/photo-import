@@ -40,8 +40,8 @@ Re-importing a card that still holds already-imported files is near-instant: eac
 
 - `pm <source>` — import from a directory. Flags: `--dry-run`, `--debug`.
 - `pm export` — generate presentation HEICs into `Export/` (see below). Flags: `--since YYYY-MM-DD`, `--dry-run`, `--debug`.
-- `pm publish` — import exported HEICs into Apple Photos (see below). Flags: `--dry-run`, `--debug`.
-- `pm pull` — pull iPhone photos from Apple Photos into the archive (see below). Flags: `--since YYYY-MM-DD`, `--dry-run`, `--debug`.
+- `pm publish` — import exported HEICs into Apple Photos (see below). Flags: `--dry-run`, `--debug`, `--photos-library PATH`.
+- `pm pull` — pull iPhone photos from Apple Photos into the archive (see below). Flags: `--since YYYY-MM-DD`, `--dry-run`, `--debug`, `--photos-library PATH`.
 - `pm index` — build or refresh the content-hash index.
 - `pm stats` — show index location and size.
 - `pm config <cmd>` — read/write the config file (see below).
@@ -65,6 +65,9 @@ Export is incremental: a source whose hash is already recorded in the `derivativ
 
 `pm publish` imports the `Export/` HEICs that `export` recorded but has not yet pushed into Apple Photos, as a flat import with no album creation.
 It requires [`osxphotos`](https://github.com/RhetTbull/osxphotos) — not packaged for Homebrew, so it's managed as a separate tool dependency rather than by the `pm` formula.
+`osxphotos` reads the Photos library's files directly, which macOS gates behind Full Disk Access for whatever terminal app is running it — if a run fails with a Python traceback mentioning "Operation not permitted", grant Full Disk Access to your terminal in System Settings > Privacy & Security, then restart it.
+
+`--photos-library PATH` targets a specific library instead of whatever's open — useful for testing against a throwaway library. It pins `osxphotos query`, but **not** `osxphotos import`: import always writes into whichever library Photos.app currently has open, regardless of this flag, so publish checks the pinned and ambient manifests match before writing and aborts if Photos.app isn't actually on the target library. Switching Photos.app itself (File > Switch Library) is still on you.
 
 Two independent layers keep it from duplicating:
 
@@ -77,6 +80,7 @@ Apple Photos has no unattended programmatic delete by design — `osxphotos` can
 ### Pull
 
 `pm pull` makes the archive canonical for iPhone photos: it exports phone-origin assets from Apple Photos into a queue directory via `osxphotos`, then runs the existing import pipeline over the queue, so BLAKE3 dedup and `YYYY/MM` organizing apply unchanged.
+Same `osxphotos`/Full Disk Access requirement as publish, above.
 
 Assets are scoped by a device model allowlist — `pull_devices` in the config, defaulting to `Apple iPhone 13 mini` — and any asset this tool published is excluded so a derivative is never re-ingested.
 Two independent layers keep repeat pulls cheap: `osxphotos --update` skips re-exporting to the queue, and the content-hash index skips re-importing.

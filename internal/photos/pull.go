@@ -41,7 +41,7 @@ func AllowedDevices(devices []string) map[string]bool {
 // Export exports the given asset uuids into dir via osxphotos, with --update
 // so already-exported assets are skipped and --skip-live so Live Photo motion
 // components are left behind.
-func (OSXPhotos) Export(dir string, uuids []string) error {
+func (o OSXPhotos) Export(dir string, uuids []string) error {
 	if len(uuids) == 0 {
 		return nil
 	}
@@ -63,11 +63,10 @@ func (OSXPhotos) Export(dir string, uuids []string) error {
 		return err
 	}
 
-	out, err := exec.Command("osxphotos", "export", dir,
-		"--uuid-from-file", f.Name(),
-		"--update", "--skip-live").CombinedOutput()
+	args := append([]string{"export", dir, "--uuid-from-file", f.Name(), "--update", "--skip-live"}, o.libraryArgs()...)
+	out, err := exec.Command("osxphotos", args...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("osxphotos export: %v: %s", err, out)
+		return fmt.Errorf("osxphotos export: %v: %s%s", err, out, fullDiskAccessHint(out))
 	}
 	return nil
 }

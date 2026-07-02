@@ -103,3 +103,18 @@ func TestPullable(t *testing.T) {
 		t.Error("asset before --since should not be pullable")
 	}
 }
+
+func TestFullDiskAccessHint(t *testing.T) {
+	if h := fullDiskAccessHint([]byte("some unrelated osxphotos error")); h != "" {
+		t.Errorf("unrelated output should yield no hint, got %q", h)
+	}
+	if h := fullDiskAccessHint([]byte("...Operation not permitted...")); h == "" {
+		t.Error("the TCC 'Operation not permitted' signature should yield a hint")
+	}
+	if h := fullDiskAccessHint([]byte("...NSCocoaErrorDomain Code=513...")); h == "" {
+		t.Error("the TCC 'NSCocoaErrorDomain Code=513' signature should yield a hint")
+	}
+	if h := fullDiskAccessHint(nil); h != "" {
+		t.Errorf("nil output should yield no hint, got %q", h)
+	}
+}
